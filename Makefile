@@ -103,8 +103,8 @@ up: ensure-build-contexts
 	$(COMPOSE_WITH_CONTEXT) --profile simulator --profile client up -d
 
 down:
-	# Default down keeps named volumes (simulator/client DB data preserved)
-	$(COMPOSE) down
+	# Bring down full stack including profile services and orphans; keep named volumes by default
+	$(COMPOSE_WITH_CONTEXT) --profile simulator --profile client down --remove-orphans
 
 clean:
 	# Stop and remove containers, networks and volumes defined in compose, then prune dangling volumes
