@@ -199,14 +199,13 @@ def add_organization_member(request, organization_id: int, payload: AddOrganizat
     )
     return {"organization_id": organization.id, "user_id": target_user.id, "role": membership.role, "created": created}
 
-@router.post("/token/", response=dict, tags=['Auth'])
+@router.post("/token/legacy/", response=dict, tags=['Auth'])
 def login(request, username: str, password: str):
-    # Deprecated: prefer /token/ handled by SimpleJWT `obtain_token` below.
+    # Backward-compatible endpoint kept for older clients.
     user = authenticate(request, username=username, password=password)
     if not user:
         return {"error": "Invalid credentials"}, 400
-    # Return a simple acknowledgement; use the SimpleJWT endpoints instead.
-    return {"detail": "Use /api/core/token/ to obtain JWT via SimpleJWT."}
+    return {"detail": "Legacy endpoint. Prefer /api/core/token/ for JWT access/refresh."}
 
 @router.post(
     "/gatewaysiot/",
