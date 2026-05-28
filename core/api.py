@@ -366,8 +366,6 @@ def check_gateway_access(request, gateway_id: int):
     }, 400
 
 # Middleware to validate JWT tokens will be implemented separately.
-
-router = Router()
 @router.post(
     "/token/",
     tags=["Authentication"],

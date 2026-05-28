@@ -11,6 +11,7 @@ from django.core.management.base import BaseCommand
 from facade.models import Property
 from facade.utils import format_influx_line
 from orchestrator.models import DigitalTwinInstance, DigitalTwinInstanceProperty
+from core.api import get_gateway_auth_headers
 from datetime import datetime
 from urllib.parse import urlparse
 
@@ -46,87 +47,140 @@ class Command(BaseCommand):
         self.sem = None
 
     async def get_jwt_token(self, device):
+        # Unified auth: use get_gateway_auth_headers to support api_key or username/password
         gateway = device.gateway
-        if getattr(gateway, 'auth_method', None) == getattr(gateway, 'AUTH_METHOD_API_KEY', 'api_key'):
-            if gateway.api_key:
-                return gateway.api_key
-            logger.warning(f"Gateway {gateway} configured for ApiKey auth but api_key is empty")
-            return None
-        # Check token cache first
         gw_id = getattr(gateway, 'id', None)
+        # Return cached headers if still valid
         if gw_id is not None:
             cached = self.token_cache.get(gw_id)
-            if cached and cached.get('token') and cached.get('expires_at', 0) > time.time():
-                return cached['token']
-        url = f"{gateway.url}/api/auth/login"
-        payload = {
-            "username": gateway.username,
-            "password": gateway.password
-        }
-        headers = {
-            "Content-Type": "application/json"
-        }
+            if cached and cached.get('headers') and cached.get('expires_at', 0) > time.time():
+                return cached['headers']
+
         try:
-            response = await sync_to_async(requests.post)(url, headers=headers, data=json.dumps(payload), timeout=5)
-            # If login failed, log status and body to help debugging
-            if response.status_code != 200:
-                body = None
-                try:
-                    body = response.json()
-                except Exception:
-                    body = response.text
-                logger.warning(f"Failed to authenticate to {url}: status={response.status_code}, body={body}")
-                raise Exception(f"Auth failed: {response.status_code}")
+            auth_response, status = await sync_to_async(get_gateway_auth_headers)(None, gw_id)
+            if status != 200:
+                # log and backoff
+                raise Exception(f"Auth failure: {auth_response}")
+
+            headers = auth_response.get('headers')
+            token = auth_response.get('token')
+            token_type = auth_response.get('token_type') or ( 'api_key' if headers and headers.get('X-Authorization','').lower().startswith('apikey') else None)
+
+            # Cache headers/token for bearer tokens (approx 23 hours) and for api_key indefinite
+            expires_at = time.time() + (23 * 3600) if token_type == 'bearer' else time.time() + (24 * 3600 * 365)
+            if gw_id is not None:
+                self.token_cache[gw_id] = {'headers': headers, 'token': token, 'token_type': token_type, 'expires_at': expires_at}
 
             # reset failure counter on success
             self.failure_counts[device.id] = 0
-            token = None
-            try:
-                token = response.json().get("token")
-            except Exception:
-                token = None
-
-            if not token:
-                logger.warning(f"Auth response from {url} did not provide a token: {response.text}")
-                raise Exception("Empty token returned from auth endpoint")
-
-            # cache token for 23 hours to avoid repeated logins
-            if gw_id is not None:
-                try:
-                    self.token_cache[gw_id] = {
-                        'token': token,
-                        'expires_at': time.time() + (23 * 3600)
-                    }
-                except Exception:
-                    pass
-
-            return token
+            return headers
         except Exception as e:
             # exponential backoff: cap at 60s
             self.failure_counts[device.id] += 1
             retries = self.failure_counts[device.id]
             delay = min(60, 2 ** min(retries, 6))
             now = time.time()
-            # throttle logging to once every 60s per device (avoid huge logs)
             if now - self.last_log_at[device.id] > 60:
-                logger.warning(f"Failed to get JWT token for device {getattr(device, 'name', device.id)}: {str(e)}; will retry in {delay}s")
+                logger.warning(f"Failed to obtain auth headers for device {getattr(device, 'name', device.id)}: {str(e)}; will retry in {delay}s")
                 self.last_log_at[device.id] = now
-            # sleep here to slow down retry attempts
             await asyncio.sleep(delay)
             return None
 
-    async def get_ws_url(self, device):
-        # Obtain a valid JWT token first; if we couldn't get one, return None so
-        # the caller skips creating a ws task for this device for now.
-        jwt_token = await self.get_jwt_token(device)
-        if not jwt_token:
-            return None
+    async def get_ws_connection_params(self, device):
+        """Return (ws_url, extra_headers, auth_cmd_token).
 
-        # Parse gateway URL and construct websocket URL properly (supports http/https)
-        parsed = urlparse(device.gateway.url)
-        netloc = parsed.netloc or parsed.path  # handle urls without scheme
+        For ThingsBoard telemetry websocket we must authenticate using a JWT in
+        the query string (?token=<jwt>). API key auth alone doesn't work for
+        this endpoint, so when gateway auth is api_key we attempt a fallback
+        login with username/password if available.
+        """
+        # Obtain auth headers (which may include token) first; if we couldn't get them, return (None, None)
+        headers = await self.get_jwt_token(device)
+        if not headers:
+            return None, None, None
+
+        gateway = device.gateway
+        parsed = urlparse(gateway.url)
+        netloc = parsed.netloc or parsed.path
         scheme = 'wss' if parsed.scheme == 'https' else 'ws'
-        return f"{scheme}://{netloc}/api/ws/plugins/telemetry?token={jwt_token}"
+        base_ws = f"{scheme}://{netloc}/api/ws/plugins/telemetry"
+
+        # Prefer the actual auth mode returned by get_gateway_auth_headers.
+        # This avoids relying only on gateway.auth_method when the DB value is stale.
+        token_type = None
+        gw_id = getattr(gateway, 'id', None)
+        if gw_id is not None:
+            cached = self.token_cache.get(gw_id) or {}
+            token_type = cached.get('token_type')
+
+        # API key auth isn't sufficient for /api/ws/plugins/telemetry in TB.
+        # Try username/password fallback to obtain a JWT for websocket usage.
+        if token_type == 'api_key' or getattr(gateway, 'auth_method', None) == getattr(gateway, 'AUTH_METHOD_API_KEY', 'api_key'):
+            username = (getattr(gateway, 'username', None) or '').strip()
+            password = (getattr(gateway, 'password', None) or '').strip()
+            if username and password:
+                try:
+                    login_url = f"{gateway.url.rstrip('/')}/api/auth/login"
+                    login_headers = {"Content-Type": "application/json"}
+                    payload = {"username": username, "password": password}
+                    response = await sync_to_async(requests.post)(
+                        login_url,
+                        headers=login_headers,
+                        data=json.dumps(payload),
+                        timeout=5,
+                    )
+                    if response.status_code == 200:
+                        token = response.json().get('token')
+                        if token:
+                            bearer_headers = {
+                                "Content-Type": "application/json",
+                                "X-Authorization": f"Bearer {token}",
+                            }
+                            if gw_id is not None:
+                                self.token_cache[gw_id] = {
+                                    'headers': bearer_headers,
+                                    'token': token,
+                                    'token_type': 'bearer',
+                                    'expires_at': time.time() + (23 * 3600),
+                                }
+                            return f"{base_ws}?token={token}", None, None
+                    else:
+                        logger.warning(
+                            f"JWT fallback login failed for gateway {getattr(gateway, 'name', gateway)} "
+                            f"({getattr(gateway, 'url', '')}): status={response.status_code}, body={response.text[:200]}"
+                        )
+                except Exception:
+                    logger.exception(
+                        f"JWT fallback login exception for gateway {getattr(gateway, 'name', gateway)} "
+                        f"({getattr(gateway, 'url', '')})"
+                    )
+
+            now = time.time()
+            if now - self.last_log_at[device.id] > 60:
+                logger.warning(
+                    f"Gateway {getattr(gateway, 'name', gateway)} is configured with API key, "
+                    "but ThingsBoard telemetry websocket requires JWT token in query. "
+                    "Configure gateway with username/password (or fill username/password for fallback)."
+                )
+                self.last_log_at[device.id] = now
+            return None, None, None
+
+        # Otherwise try to extract a bearer token to place in the query param
+        token = None
+        if gw_id is not None:
+            cached = self.token_cache.get(gw_id) or {}
+            if cached.get('token'):
+                token = cached.get('token')
+        if not token:
+            xauth = headers.get('X-Authorization')
+            if xauth and ' ' in xauth:
+                token = xauth.split(' ', 1)[1]
+
+        if not token:
+            logger.warning(f"No token available for websocket for gateway {getattr(gateway, 'id', None)}")
+            return None, None, None
+
+        return f"{base_ws}?token={token}", None, None
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -178,15 +232,25 @@ class Command(BaseCommand):
     async def listen_to_device(self, device):
         while True:
             try:
-                # Obtain a fresh WS URL (with valid JWT) before each connection attempt
-                ws_url = await self.get_ws_url(device)
+                # Obtain a fresh WS URL and optional extra headers before each connection attempt
+                ws_url, extra_headers, _auth_cmd_token = await self.get_ws_connection_params(device)
                 if not ws_url:
-                    # Failed to get JWT (backoff already applied inside get_jwt_token)
+                    # Failed to get auth (backoff already applied inside get_jwt_token)
                     await asyncio.sleep(5)
                     continue
 
-                logger.debug(f"Attempting WebSocket connection to {ws_url} for device {device.name}")
-                async with websockets.connect(ws_url, timeout=10) as websocket:
+                if extra_headers:
+                    try:
+                        header_keys = list(extra_headers.keys()) if isinstance(extra_headers, dict) else []
+                    except Exception:
+                        header_keys = []
+                    logger.info(f"WS connect to {ws_url} for device {device.name} using extra_headers keys={header_keys}")
+                else:
+                    logger.info(f"WS connect to {ws_url} for device {device.name} using token in query")
+                connect_kwargs = {'timeout': 10}
+                if extra_headers:
+                    connect_kwargs['extra_headers'] = extra_headers
+                async with websockets.connect(ws_url, **connect_kwargs) as websocket:
                     logger.info(f"Connected to ThingsBoard WebSocket for device {device.name}")
                     
                     # Subscribe to updates for the device
@@ -200,7 +264,26 @@ class Command(BaseCommand):
                             }
                         ],
                         "historyCmds": [],
-                        "attrSubCmds": []
+                        "attrSubCmds": [
+                            {
+                                "entityType": "DEVICE",
+                                "entityId": device.identifier,
+                                "scope": "CLIENT_SCOPE",
+                                "cmdId": 2
+                            },
+                            {
+                                "entityType": "DEVICE",
+                                "entityId": device.identifier,
+                                "scope": "SHARED_SCOPE",
+                                "cmdId": 3
+                            },
+                            {
+                                "entityType": "DEVICE",
+                                "entityId": device.identifier,
+                                "scope": "SERVER_SCOPE",
+                                "cmdId": 4
+                            }
+                        ]
                     }
 
                     await websocket.send(json.dumps(subscribe_message))
@@ -220,6 +303,12 @@ class Command(BaseCommand):
                 # than reconnecting immediately with the same (invalid) token.
                 msg = str(e)
                 if isinstance(e, websockets.exceptions.ConnectionClosed) and getattr(e, 'code', None) == 1011 and 'Invalid JWT' in msg:
+                    # Invalidate bearer cache so next attempt forces a fresh login.
+                    gw_id = getattr(getattr(device, 'gateway', None), 'id', None)
+                    if gw_id is not None:
+                        cached = self.token_cache.get(gw_id) or {}
+                        if cached.get('token_type') == 'bearer':
+                            self.token_cache.pop(gw_id, None)
                     logger.warning(f"Invalid JWT for device {device.name}; will refresh token and retry in {delay}s")
                 else:
                     if now - self.last_log_at[device.id] > 60:
@@ -232,18 +321,19 @@ class Command(BaseCommand):
     async def check_device_status(self, device):
         """Verifica o status do dispositivo no ThingsBoard"""
         try:
-            jwt_token = await self.get_jwt_token(device)
-            url = f"{device.gateway.url}/api/plugins/telemetry/DEVICE/{device.identifier}/values/attributes"
-            if getattr(device.gateway, 'auth_method', None) == getattr(device.gateway, 'AUTH_METHOD_API_KEY', 'api_key'):
-                headers = {
-                    "Content-Type": "application/json",
-                    "X-Authorization": f"ApiKey {jwt_token}"
-                }
-            else:
-                headers = {
-                    "Content-Type": "application/json",
-                    "X-Authorization": f"Bearer {jwt_token}"
-                }
+            # Use unified auth headers from core.get_gateway_auth_headers
+            gw_id = getattr(device.gateway, 'id', None)
+            auth_response = None
+            if gw_id is not None:
+                cached = self.token_cache.get(gw_id)
+                if cached and cached.get('headers') and cached.get('expires_at', 0) > time.time():
+                    auth_response = cached.get('headers')
+            if not auth_response:
+                auth_response = await self.get_jwt_token(device)
+            if not auth_response:
+                return False
+            url = f"{device.gateway.url.rstrip('/')}/api/plugins/telemetry/DEVICE/{device.identifier}/values/attributes"
+            headers = auth_response
             # Use session per gateway to reuse connections
             gw_id = getattr(device.gateway, 'id', None)
             if gw_id not in self.sessions:
