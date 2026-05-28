@@ -1,0 +1,222 @@
+[
+{
+  "@context": ["dtmi:dtdl:context;3","dtmi:dtdl:extension:causal;1"],
+  "@id": "dtmi:housegen:AirConditioner;1",
+  "@type": "Interface",
+  "displayName": "AirConditioner",
+  "contents": [
+    {
+      "@type": ["Property","Causal"],
+      "name": "temperature",
+      "schema": "double"
+    },
+    {
+      "@type": ["Property","Causal"],
+      "name": "status",
+      "schema": "boolean"
+    }
+  ]
+},
+{
+    "@context": ["dtmi:dtdl:context;3"],
+    "@id": "dtmi:housegen:Garden;1",
+    "@type": "Interface",
+    "displayName": "Garden",
+    "contents": [
+        {
+            "@type": "Telemetry",
+            "name": "soilHumidity",
+            "schema": "double",
+            "displayName": "Soil Humidity"
+        },
+        {
+            "@type":"Relationship",
+            "name":"has_irrigationSystem",
+            "target":"dtmi:housegen:Irrigation;1"
+        }
+    ]
+},
+{
+   
+    "@context":["dtmi:dtdl:context;3"],
+    "@id":"dtmi:housegen:House;1",
+    "@type":"Interface",
+    "displayName": "House",
+    "contents": [
+        {
+            "@type": "Property",
+            "name": "name",
+            "writable": true,
+            "schema": "string"
+        },
+        {
+            "@type": "Property",
+            "name": "address",
+            "writable": true,
+            "schema": "string"
+        },
+        {
+            "@type": "Relationship",
+            "name": "has_rooms",
+            "target": "dtmi:housegen:Room"
+        },
+        {
+            "@type": "Relationship",
+            "name": "has_pool",
+            "minMultiplicity": 0,
+            "maxMultiplicity": 1,
+            "target": "dtmi:housegen:Pool"
+        },
+        {
+            "@type": "Relationship",
+            "name": "has_gardens",
+            "minMultiplicity": 0,
+            "maxMultiplicity": 5,
+            "target": "dtmi:housegen:Garden"
+        }
+    ]
+},
+{
+    "@context": ["dtmi:dtdl:context;3","dtmi:dtdl:extension:causal;1"],
+    "@id": "dtmi:housegen:Irrigation;1",
+    "@type": "Interface",
+    "displayName": "Irrigation",
+    "contents": [
+        {
+            "@type": "Telemetry",
+            "name": "waterFlowRate",
+            "schema": "double",
+            "displayName": "Water Flow Rate",
+            "description": "The rate of water flow in liters per minute"
+        },
+        {
+            "@type": ["Property","Causal"],
+            "name": "irrigationStatus",
+            "schema": "boolean",
+            "displayName": "Set the Irrigation status",
+            "description": "Defines if the irrigation system is ON or OFF"
+        }
+    ]
+},
+{
+  "@context": ["dtmi:dtdl:context;3","dtmi:dtdl:extension:causal;1"],
+  "@id": "dtmi:housegen:LightBulb;1",
+  "@type": "Interface",
+  "displayName": "LightBulb",
+  "contents": [
+    {
+      "@type": ["Property","Causal"],
+      "name": "status",
+      "schema": "boolean"
+    }
+  ]
+},
+{
+    "@context": ["dtmi:dtdl:context;3","dtmi:dtdl:extension:quantitativeTypes;1"],
+    "@id": "dtmi:housegen:Pool;1",
+    "@type": "Interface",
+    "displayName": "Pool",
+    "contents": [
+      {
+        "@type": ["Property","Area"],
+        "name": "size",
+        "schema": "double",
+        "writable": true,
+        "unit": "squareFoot"
+      },
+      {
+        "@type": ["Telemetry","Temperature"],
+        "name": "temperature",
+        "schema": "double",
+        "unit":"degreeCelsius"
+      },
+      {
+        "@type": "Telemetry",
+        "name": "waterLevel",
+        "schema": "double"
+      },
+      {
+        "@type": "Relationship",
+        "name": "has_pump",
+        "minMultiplicity": 0,
+        "maxMultiplicity": 1,
+        "target": "dtmi:housegen:Pump;1"
+      }
+    ]
+  },
+  {
+    "@context": ["dtmi:dtdl:context;3","dtmi:dtdl:extension:causal;1"],
+    "@id": "dtmi:housegen:PoolPump;1",
+    "@type": "Interface",
+    "displayName": "Pump",
+    "contents": [
+        {
+            "@type": "Telemetry",
+            "name": "pressure",
+            "schema": "double",
+            "displayName": "Pressure",
+            "description": "The pressure of the pump in PSI"
+        },
+        {
+            "@type": "Telemetry",
+            "name": "waterflowRate",
+            "schema": "double",
+            "displayName": "Flow Rate",
+            "description": "The flow rate of the pump in GPM"
+        },
+        {
+            "@type": "Property",
+            "name": "operationalStatus",
+            "schema": "string",
+            "displayName": "Status",
+            "description": "The operational status of the pump"
+        },
+        {
+            "@type": ["Property","Causal"],
+            "name": "status",
+            "schema": "boolean",
+            "description": "Indicates if the pump is on or off"
+        }
+    ]
+},
+{
+  "@context": ["dtmi:dtdl:context;3","dtmi:dtdl:extension:quantitativeTypes;1"],
+  "@id": "dtmi:housegen:Room;1",
+  "@type": "Interface",
+  "displayName": "Room",
+  "contents": [
+    {
+      "@type": ["Property","Area"],
+      "name": "size",
+      "schema": "double",
+      "writable": true,
+      "unit": "squareFoot"
+    },
+    {
+      "@type": ["Telemetry","Temperature"],
+      "name": "temperature",
+      "schema": "double",
+      "unit":"degreeCelsius"
+    },
+    {
+      "@type": "Telemetry",
+      "name": "gas",
+      "schema": "boolean"
+    },
+    {
+      "@type": "Relationship",
+      "name": "has_lights",
+      "minMultiplicity": 0,
+      "maxMultiplicity": 5,
+      "target": "dtmi:housegen:LightBulb;1"
+    },
+    {
+      "@type": "Relationship",
+      "name": "has_airconditioner",
+      "minMultiplicity": 0,
+      "maxMultiplicity": 1,
+      "target": "dtmi:housegen:AirConditioner;1"
+    }
+  ]
+}
+]
