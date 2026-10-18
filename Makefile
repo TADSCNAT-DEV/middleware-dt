@@ -6,13 +6,13 @@ SIMULATOR_CONTEXT ?= $(shell if [ -d ./iot_simulator ]; then echo ./iot_simulato
 CLIENT_CONTEXT ?= $(shell if [ -d ./middts-client ]; then echo ./middts-client; elif [ -d ../middts-client ]; then echo ../middts-client; else echo ""; fi)
 COMPOSE_WITH_CONTEXT = SIMULATOR_CONTEXT="$(SIMULATOR_CONTEXT)" CLIENT_CONTEXT="$(CLIENT_CONTEXT)" $(COMPOSE)
 
-PHONY: help deps build-with-deps ensure-simulator-context ensure-client-context ensure-build-contexts build build-refresh build-nocache up down restart logs migrate collectstatic shell sim-up sim-down client-up client-down client-build update db-backup deploy clean fullclean prune-safe prune-all space-report seed-house discover-gateways discover-devices seed-house-devices
+.PHONY: help deps build-with-deps ensure-simulator-context ensure-client-context ensure-build-contexts build build-refresh build-nocache up down restart logs migrate collectstatic shell sim-up sim-down client-up client-down client-build update db-backup deploy clean fullclean prune-safe prune-all space-report seed-house reset-house seed-gateway discover-gateways discover-devices seed-house-devices
 
 help:
 	@echo "Usage: make <target>"
 	@echo "Main flow: make build && make up"
 	@echo "Bootstrap: deps build-with-deps"
-	@echo "Targets: deps build-with-deps build build-refresh build-nocache up down restart logs migrate collectstatic shell sim-up sim-down client-build client-up client-down update db-backup deploy clean fullclean prune-safe prune-all space-report seed-house discover-devices seed-house-devices"
+	@echo "Targets: deps build-with-deps build build-refresh build-nocache up down restart logs migrate collectstatic shell sim-up sim-down client-build client-up client-down update db-backup deploy clean fullclean prune-safe prune-all space-report seed-house reset-house seed-gateway discover-devices seed-house-devices"
 	@if [ -n "$(SIMULATOR_CONTEXT)" ]; then echo "Simulator context auto-detected: $(SIMULATOR_CONTEXT)"; else echo "Simulator context not found (expected ./iot_simulator or ../iot_simulator)"; fi
 	@if [ -n "$(CLIENT_CONTEXT)" ]; then echo "Client context auto-detected: $(CLIENT_CONTEXT)"; else echo "Client context not found (expected ./middts-client or ../middts-client)"; fi
 
@@ -191,8 +191,17 @@ db-restore:
 	@echo "  cat middts.sql | docker exec -i $$(docker compose -f docker-compose.yml ps -q db) psql -U ${POSTGRES_USER:-postgres} middts"
 
 # Carrega o cenário House 2.0 (SystemContext + 8 DTDLModels) via API REST.
-# Requer que o middleware esteja UP. Passe ARGS="--force" para recriar modelos existentes.
-seed-house:
+# Requer middleware UP. reset-house recria apenas modelos originais da demo sem instancias.
+# The script is streamed from this repository, so simulator images need no extra command.
+seed-gateway:
+	$(COMPOSE_WITH_CONTEXT) exec -T -e GATEWAY_SEED_DRY_RUN=$(if $(findstring --dry-run,$(ARGS)),1,0) middleware python manage.py shell < scenarios/bootstrap_gateway.py
+	$(COMPOSE_WITH_CONTEXT) --profile simulator exec -T -e GATEWAY_SEED_DRY_RUN=$(if $(findstring --dry-run,$(ARGS)),1,0) simulator python manage.py shell < scenarios/bootstrap_gateway.py
+
+# Reset only the example models; do not run gateway bootstrap or touch simulator data.
+reset-house:
+	$(COMPOSE) exec -T middleware python manage.py load_house_scenario --base-url http://localhost:8000 --reset $(ARGS)
+
+seed-house: seed-gateway
 	$(COMPOSE) exec -T middleware python manage.py load_house_scenario --base-url http://localhost:8000 $(ARGS)
 
 # Simple healthcheck for main services

@@ -95,7 +95,7 @@ Se você for usar um parser externo, configure a URL do serviço na variável de
 Se preferir um container isolado, você pode subir a API auxiliar de parser com:
 
 ```bash
-docker run -p 8082:8080 -p andregustavoo/parserwebapi:latest
+docker run -p 8082:8080 andregustavoo/parserwebapi:latest
 ```
 
 Exemplo:
@@ -126,13 +126,33 @@ Ajuste o `.env` ou o arquivo de settings equivalente do seu ambiente com os dado
 ## 4. Aplicar migrações e subir o middleware
 
 ```bash
-python manage.py makemigrations
 python manage.py migrate
 python manage.py createsuperuser
 python manage.py runserver
 ```
 
 Se o ambiente também depender do Neo4j, InfluxDB ou parser externo, valide primeiro que esses serviços estão disponíveis e que as URLs/credenciais foram ajustadas no `.env` e nos settings.
+
+O comando `createsuperuser` pede usuário, e-mail e senha; essa conta dá acesso a `/admin/` e à autenticação JWT do MiddTS. Na execução manual, definir `DJANGO_SUPERUSER_*` no `.env` não executa o bootstrap do container. Para recuperar a senha de uma conta existente:
+
+```bash
+python manage.py changepassword nome_do_usuario
+```
+
+Para executar fora do Docker, use endereços acessíveis pelo host: por exemplo, `POSTGRES_HOST=localhost` e a porta publicada do PostgreSQL. Nomes como `db`, `neo4j`, `influxdb` e `parser` do template são nomes da rede Compose. Configure também `NEO4J_USER`, `NEO4J_PASSWORD` e `NEO4J_URL`, além do token e endereço do InfluxDB.
+
+O IoT Simulator tem banco e usuários próprios. Na pasta dele, com seu ambiente virtual e suas variáveis carregadas, execute:
+
+```bash
+export DJANGO_SETTINGS_MODULE=iot_simulator.settings_base
+python manage.py migrate
+python manage.py createsuperuser
+python manage.py runserver 8001
+```
+
+Entre em `http://localhost:8001/admin/` com a conta criada nesse passo. Para trocar uma senha existente, execute `python manage.py changepassword nome_do_usuario` nessa mesma pasta. O login do ThingsBoard (`THINGSBOARD_USER` / `THINGSBOARD_PASSWORD`) é independente dessas contas. Evite reutilizar o ambiente PostgreSQL do middleware ao iniciar o simulador: sem `POSTGRES_HOST` e `POSTGRES_DB`, ele usa SQLite.
+
+Para o comportamento de senhas no Docker e a integração com o client, consulte [acessos e senhas](demo-make.md#2-preparar-o-ambiente).
 
 ## 5. Observações
 

@@ -14,3 +14,7 @@ settings.py
 .env
 __pycache__/
 cleanup_docker.sh
+
+# Dependency repositories cloned by make deps
+/iot_simulator/
+/middts-client/

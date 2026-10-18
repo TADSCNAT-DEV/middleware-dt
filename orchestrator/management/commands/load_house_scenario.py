@@ -9,7 +9,7 @@ própria API, exercitando o stack completo:
 Uso:
     python manage.py load_house_scenario
     python manage.py load_house_scenario --base-url http://localhost:8000
-    python manage.py load_house_scenario --force   # recria mesmo se já existir
+    python manage.py load_house_scenario --reset   # recria exemplos sem instâncias
     python manage.py load_house_scenario --system-name "Casa 2.0"
 
 Equivalente via Make (dentro do container middleware):
@@ -25,6 +25,8 @@ import requests
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 from django.test import Client
+from django.db import transaction
+from django.db.models.deletion import Collector
 
 # Ordem de criação garante que modelos sem dependências venham antes.
 # O parser lida com relacionamentos entre modelos na mesma especificação,
@@ -104,9 +106,14 @@ class Command(BaseCommand):
             help=f"Nome do SystemContext a criar (default: '{SYSTEM_NAME}')",
         )
         parser.add_argument(
+            "--reset",
+            action="store_true",
+            help="Recria apenas modelos originais da demo, recusando modelos editados ou em uso",
+        )
+        parser.add_argument(
             "--force",
             action="store_true",
-            help="Recria os DTDLModels mesmo se o sistema já existir",
+            help="Alias obsoleto de --reset; use --reset",
         )
         parser.add_argument(
             "--dry-run",
@@ -123,7 +130,10 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         base_url = options["base_url"].rstrip("/")
         system_name = options["system_name"]
-        force = options["force"]
+        reset = options.get("reset", False) or options["force"]
+        force = False  # Existing models are always checked; never blindly POST duplicates.
+        if options["force"]:
+            self.stdout.write(self.style.WARNING("--force foi substituido por --reset (com protecoes)."))
         dry_run = options["dry_run"]
         username = options["username"]
         session = self._build_authenticated_session(username)
@@ -146,13 +156,45 @@ class Command(BaseCommand):
         if dry_run and system_id is None:
             system_id = "<dry-run-id>"
 
-        # --- 3. Carregar modelos DTDL ---
-        results = self._load_models(
-            session, base_url, system_id, force, dry_run
-        )
+        # Deletion and recreation share a transaction. A parser/API failure rolls back.
+        with transaction.atomic():
+            if reset and system_id != "<dry-run-id>":
+                self._reset_example_models(system_id, username, dry_run)
+            results = self._load_models(
+                session, base_url, system_id, force, dry_run
+            )
+            self._print_summary(results, dry_run)
 
-        # --- 4. Sumário ---
-        self._print_summary(results, dry_run)
+    def _reset_example_models(self, system_id, username, dry_run):
+        from orchestrator.models import SystemContext, DTDLModel
+
+        system = SystemContext.objects.select_for_update().get(pk=system_id)
+        if system.description != SYSTEM_DESCRIPTION or not system.created_by or system.created_by.username != username:
+            raise CommandError("Reset recusado: sistema nao identificado como demo criada por este usuario.")
+        specs = {}
+        for filename in MODEL_ORDER:
+            path = SCENARIOS_DIR / filename
+            if not path.exists():
+                raise CommandError("Reset recusado: arquivos originais da demo incompletos.")
+            spec = json.loads(path.read_text())
+            specs[spec['@id']] = spec
+
+        models = list(DTDLModel.objects.select_for_update().filter(
+            system=system, dtdl_id__in=specs,
+        ))
+        if any(model.specification != specs[model.dtdl_id] for model in models):
+            raise CommandError("Reset recusado: um modelo da demo foi editado. Nenhum modelo removido.")
+        queryset = DTDLModel.objects.filter(pk__in=[model.pk for model in models])
+        collector = Collector(using=queryset.db)
+        collector.collect(queryset)
+        allowed = {'orchestrator.dtdlmodel', 'orchestrator.modelelement', 'orchestrator.modelrelationship'}
+        affected = {model._meta.label_lower for model, rows in collector.data.items() if rows}
+        affected.update(qs.model._meta.label_lower for qs in collector.fast_deletes if qs.exists())
+        if affected - allowed:
+            raise CommandError("Reset recusado: modelos possuem instancias ou vinculos. Nenhum modelo removido.")
+        self.stdout.write(f"Reset da demo: {len(models)} modelos originais; outros cadastros preservados.")
+        if not dry_run:
+            queryset.delete()
 
     # ------------------------------------------------------------------
     def _check_api(self, session, base_url):
@@ -189,7 +231,10 @@ class Command(BaseCommand):
         resp.raise_for_status()
         systems = resp.json()
 
-        existing = next((s for s in systems if s["name"] == name), None)
+        matches = [s for s in systems if s["name"] == name]
+        if len(matches) > 1:
+            raise CommandError("Ha sistemas com nomes duplicados. Resolva a ambiguidade antes de carregar ou resetar a demo.")
+        existing = matches[0] if matches else None
 
         if existing:
             system_id = existing["id"]
@@ -204,7 +249,7 @@ class Command(BaseCommand):
                 self.stdout.write(
                     self.style.SUCCESS(
                         f"Sistema '{name}' já existe (id={system_id}). "
-                        "Use --force para recriar os modelos."
+                        "Use --reset para recriar os exemplos sem instancias."
                     )
                 )
             return system_id
@@ -264,7 +309,7 @@ class Command(BaseCommand):
                 if existing_id is not None:
                     self.stdout.write(
                         self.style.SUCCESS(
-                            f"  → já existe (id={existing_id}), pulando. Use --force para recriar."
+                            f"  → já existe (id={existing_id}), pulando. Use --reset para recriar os exemplos sem instancias."
                         )
                     )
                     results.append({"file": filename, "model": display_name, "status": "skipped", "id": existing_id})
@@ -317,13 +362,14 @@ class Command(BaseCommand):
         url = f"{base_url}/api/orchestrator/systems/{system_id}/dtdlmodels/"
         try:
             resp = session.get(url, timeout=10)
-            if resp.status_code != 200:
-                return None
+            resp.raise_for_status()
             for m in resp.json():
                 if m.get("dtdl_id") == dtdl_id:
                     return m["id"]
-        except Exception:
-            pass
+        except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
+            raise CommandError(
+                "Nao foi possivel conferir os modelos existentes; carga interrompida para evitar duplicatas."
+            ) from exc
         return None
 
     # ------------------------------------------------------------------

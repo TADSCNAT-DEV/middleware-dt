@@ -4,6 +4,8 @@ Este guia descreve o cenário funcional do middleware com um gateway IoT, como o
 
 [Voltar para a documentação principal](../README.md#fluxo-thingsboard)
 
+Antes de começar, valide o [acesso ao MiddTS e ao simulador](demo-make.md#login-e-criação-do-administrador-do-simulador). A conta do ThingsBoard é independente dos administradores Django. Configure as credenciais da instância no `GatewayIOT` do middleware e, para o simulador, nas variáveis `THINGSBOARD_*` descritas no [guia de configuração](demo-make.md#credenciais-do-thingsboard).
+
 ## 1. Cadastrar dispositivos no gateway IoT
 
 - No ThingsBoard local, em nuvem ou em `demo.thingsboard.io`, cadastre os dispositivos físicos.
@@ -32,7 +34,7 @@ O middleware cadastra localmente os dispositivos encontrados no gateway.
 - Executar um parser DTDL auxiliar em container:
 
 ```bash
-docker run -p 8082:8080 -p andregustavoo/parserwebapi:latest
+docker run -p 8082:8080 andregustavoo/parserwebapi:latest
 ```
 
 - Ouvir eventos do gateway:

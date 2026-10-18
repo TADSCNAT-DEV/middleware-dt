@@ -111,7 +111,7 @@ class Command(BaseCommand):
                 )
                 return False
 
-            url = f"{device.gateway.url}/api/plugins/telemetry/DEVICE/{device.identifier}/values/attributes"
+            url = f"{device.gateway.url.rstrip('/')}/api/plugins/telemetry/DEVICE/{device.identifier}/values/attributes"
             headers = {
                 "Content-Type": "application/json",
                 "X-Authorization": f"Bearer {jwt_token}"

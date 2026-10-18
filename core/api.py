@@ -297,7 +297,7 @@ def get_gateway_auth_headers(request, gateway_id: int):
     if not gateway.username or not gateway.password:
         return {"error": "Gateway username/password are not configured."}, 400
 
-    url = f"{gateway.url}/api/auth/login"
+    url = f"{gateway.url.rstrip('/')}/api/auth/login"
     payload = {
         "username": gateway.username,
         "password": gateway.password
@@ -352,7 +352,7 @@ def check_gateway_access(request, gateway_id: int):
     if status_code != 200:
         return auth_response, status_code
 
-    response = requests.get(f"{gateway.url}/api/auth/user", headers=auth_response["headers"])
+    response = requests.get(f"{gateway.url.rstrip('/')}/api/auth/user", headers=auth_response["headers"])
     if response.status_code == 200:
         return {
             "ok": True,
