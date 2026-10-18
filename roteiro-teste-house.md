@@ -131,6 +131,49 @@ Endereços e credenciais abaixo correspondem à configuração local deste rotei
 | Parser DTDL Swagger | http://localhost:8082/swagger/index.html | Interface do parser, sem conta definida por esta stack |
 | ThingsBoard | https://demo.thingsboard.io/ | Sua conta ThingsBoard na instância escolhida |
 
+### 4.1 Portas publicadas no computador
+
+A coluna **porta local** é a que deve ser usada no navegador ou cliente instalado no computador. A porta interna é usada entre os containers.
+
+| Serviço / protocolo | Porta local | Porta interna | Como testar |
+| --- | --- | --- | --- |
+| MiddTS via Nginx — HTTP | `8000` (`MIDDLEWARE_PORT`) | Nginx `80` → middleware `8000` | http://localhost:8000/ ou `/api/docs` |
+| Simulador — HTTP | `8001` (`SIMULATOR_PORT`) | `8001` | http://localhost:8001/dashboard/ |
+| Client — HTTP | `8002` (`CLIENT_PORT`) | `8002` | http://localhost:8002/ |
+| InfluxDB — HTTP | `8086` | `8086` | http://localhost:8086/; saúde em `/health` |
+| Neo4j Browser — HTTP | `7474` | `7474` | http://localhost:7474/ |
+| Neo4j — Bolt | `7687` | `7687` | `bolt://localhost:7687` no Neo4j Browser ou driver |
+| Parser DTDL — HTTP | `8082` | `8080` | http://localhost:8082/swagger/index.html |
+| Parser — mapeamento adicional do Compose | `8083` | `8081` | Publicado, mas sem listener garantido na configuração atual; use `8082` para o teste |
+| PostgreSQL — TCP | `5432` no `.env.example` (`DB_HOST_PORT`) | `5432` | Cliente SQL em `localhost`, usando `POSTGRES_USER`, `POSTGRES_PASSWORD` e `POSTGRES_DB` |
+| Redis — TCP | `6379` | `6379` | `redis-cli -h localhost -p 6379 ping`, se a ferramenta estiver instalada |
+
+Sem `DB_HOST_PORT` no `.env`, o fallback do Compose é `5433`. Se a porta local de algum serviço foi alterada, use o valor efetivo mostrado por:
+
+```bash
+docker compose --profile simulator --profile client ps
+```
+
+Na coluna `PORTS`, `0.0.0.0:8082->8080/tcp`, por exemplo, significa acessar a porta **8082** do computador. `localhost` refere-se ao computador onde o Docker está rodando; de outro computador, use o IP desse host e as portas publicadas, com os hosts/origens das aplicações configurados para esse acesso.
+
+O ThingsBoard é externo: a interface HTTPS usa normalmente a porta `443` da instância escolhida. A porta MQTT vem da configuração do gateway (`mqtt_port` no simulador; `THINGSBOARD_MQTT_PORT` no bootstrap). Ela não é publicada pelo Compose do MiddTS. Não confunda acesso HTTP ao gateway com conexão MQTT.
+
+### 4.2 Testes rápidos de disponibilidade
+
+Com os serviços iniciados, execute:
+
+```bash
+make healthcheck
+curl -fsS http://localhost:8000/ -o /dev/null
+curl -fsS http://localhost:8001/ -o /dev/null
+curl -fsS http://localhost:8002/ -o /dev/null
+curl -fsS http://localhost:8086/health
+curl -fsS http://localhost:7474/ -o /dev/null
+curl -fsS http://localhost:8082/swagger/index.html -o /dev/null
+```
+
+Nos comandos com `-o /dev/null`, não há saída em caso de sucesso; confira o código de saída ou mensagens de erro. Uma resposta HTTP ou redirecionamento para login comprova disponibilidade, não autenticação. Ajuste as portas se tiver alterado o `.env`.
+
 PostgreSQL e Redis não têm página web nesta stack. Para verificá-los no terminal:
 
 ```bash
@@ -139,6 +182,27 @@ docker compose exec redis redis-cli ping
 ```
 
 **Resultado esperado:** PostgreSQL retorna `1` e Redis retorna `PONG`. Para um cliente SQL externo, use `localhost`, a porta `DB_HOST_PORT` e as credenciais `POSTGRES_*` do `.env`.
+
+### 4.3 Usuários e senhas padrão
+
+Estes valores correspondem ao `.env.example` e à configuração deste roteiro. Se você os alterou, use suas credenciais. Senhas de bancos já inicializados ficam persistidas nos volumes; mudar apenas o `.env` não redefine essas senhas.
+
+| Serviço | Usuário padrão | Senha padrão | Observação |
+| --- | --- | --- | --- |
+| MiddTS Admin e API JWT | `middts` | `middts123` | `DJANGO_SUPERUSER_USERNAME` / `DJANGO_SUPERUSER_PASSWORD` |
+| Client e Admin client | `middts` | `middts123` | Mesmas variáveis `DJANGO_SUPERUSER_*`, em banco próprio |
+| Simulador e Admin simulador | Escolhido na criação da conta | Escolhida na criação da conta | Execute `createsuperuser` conforme seção 5; não há login padrão garantido pelo Compose atual |
+| Neo4j Browser / Bolt | `neo4j` | `middts123` | `NEO4J_USER` / `NEO4J_PASSWORD`; alinhar com `NEO4J_AUTH` |
+| InfluxDB — interface web | `middts` | `middts123` | `INFLUXDB_INIT_USERNAME` / `INFLUXDB_INIT_PASSWORD` |
+| PostgreSQL | `middts` | `middts` | `POSTGRES_USER` / `POSTGRES_PASSWORD` do template |
+| Redis | Sem usuário exigido | Sem senha configurada | Configuração atual do Compose |
+| Parser DTDL | Sem login configurado | Sem senha configurada | Acesse o Swagger na porta `8082` |
+| Nginx | Sem login próprio | Sem senha própria | Encaminha as requisições ao MiddTS; o login é o da aplicação |
+| ThingsBoard Demo / Cloud | Sua conta na instância escolhida | Sua senha nessa instância | Não é a conta `middts`; os exemplos `tenant@thingsboard.org` / `tenant` não garantem acesso |
+
+O token padrão de escrita/leitura usado pelas aplicações no InfluxDB é `middts_token` (`INFLUXDB_TOKEN`). Ele é diferente da senha da interface web e da API Key do ThingsBoard.
+
+Para a aula, você pode escolher também `middts` como usuário do simulador, mas precisa criar essa conta explicitamente. Não publique o `.env` com senhas ou chaves pessoais.
 
 ## 5. Carregar os modelos e configurar o acesso ao simulador
 
@@ -345,6 +409,16 @@ Depois visite:
 ## 12. Inspecionar o grafo no Neo4j
 
 Abra http://localhost:7474/ e conecte com `bolt://localhost:7687`, usuário `neo4j` e senha `NEO4J_PASSWORD` do `.env`.
+
+Se o Browser retornar `Neo.ClientError.Security.Unauthorized`, confira a senha **do seu `.env`** em `NEO4J_PASSWORD`. `middts123` é somente o valor do template; uma instalação existente pode usar outra senha. No campo de conexão, selecione `bolt://` e informe `localhost:7687`; preencha usuário e senha manualmente para evitar uma credencial antiga salva pelo navegador.
+
+Para validar as credenciais configuradas no container sem exibi-las:
+
+```bash
+docker compose exec neo4j sh -c 'cypher-shell -a bolt://localhost:7687 -u "${NEO4J_AUTH%%/*}" -p "${NEO4J_AUTH#*/}" "RETURN 1 AS ok"'
+```
+
+Se retornar `1`, essas credenciais autenticam: use no Browser o usuário e a senha correspondentes ao `NEO4J_AUTH` da instalação. Se falhar também no terminal, a senha persistida pode não corresponder ao `.env`; alterar o arquivo não redefine o banco. Não remova volumes para resolver o login.
 
 Execute consultas de leitura no Browser:
 
