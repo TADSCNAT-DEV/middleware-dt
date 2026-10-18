@@ -88,7 +88,7 @@ class Device(models.Model):
         response, status_code = get_gateway_auth_headers(None, self.gateway.id)
 
         if status_code == 200:
-            url = f"{self.gateway.url}/api/plugins/telemetry/DEVICE/{self.identifier}/SERVER_SCOPE"
+            url = f"{self.gateway.url.rstrip('/')}/api/plugins/telemetry/DEVICE/{self.identifier}/SERVER_SCOPE"
             headers = response['headers']
             
             # Format payload as a dictionary
@@ -119,7 +119,7 @@ class Device(models.Model):
             return
 
         headers = response['headers']
-        url_get = f"{self.gateway.url}/api/plugins/telemetry/DEVICE/{self.identifier}/values/attributes/SHARED_SCOPE"
+        url_get = f"{self.gateway.url.rstrip('/')}/api/plugins/telemetry/DEVICE/{self.identifier}/values/attributes/SHARED_SCOPE"
 
         def normalize_property_entry(prop_name, prop_data):
             if not prop_name or not isinstance(prop_data, dict):
@@ -186,7 +186,7 @@ class Device(models.Model):
             print(f"Erro ao obter token JWT para gateway {self.gateway}: {response}")
             return
 
-        url = f"{self.gateway.url}/api/device/{self.identifier}"
+        url = f"{self.gateway.url.rstrip('/')}/api/device/{self.identifier}"
         headers = response['headers']
         try:
             resp = requests.get(url, headers=headers)
@@ -467,7 +467,7 @@ class Property(models.Model):
             return self._create_mock_response()
         
         # Setup RPC call - use TWOWAY with fast TB timeout
-        urltwoway = f"{gateway.url}/api/rpc/twoway/{device.identifier}"
+        urltwoway = f"{gateway.url.rstrip('/')}/api/rpc/twoway/{device.identifier}"
         
         # Helper function to serialize Decimal and other non-JSON types
         def json_serialize_value(value):

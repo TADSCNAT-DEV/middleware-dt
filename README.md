@@ -87,15 +87,21 @@ Esta arquitetura modular permite fácil manutenção e expansão futura.
 
 Você pode usar o middleware de duas formas principais e complementar com os guias de suporte abaixo.
 
+### Roteiro de laboratório para alunos
+
+Para executar o teste completo do zero, siga o [Roteiro House 2.0](roteiro-teste-house.md). Ele inclui configuração das credenciais, acesso aos serviços, dispositivos do simulador, descoberta, criação dos gêmeos, associação automática e evidências da atividade.
+
 ### Fluxo rápido (primeira execução)
 
 Se você quer apenas subir o ambiente completo local pela primeira vez, siga esta sequência:
 
 1. `cp .env.example .env`
-2. `make build-with-deps`
-3. `make up`
-4. `make healthcheck`
-5. `make seed-house`
+2. Revise as credenciais no `.env` conforme o [guia de acessos e senhas](docs/demo-make.md#2-preparar-o-ambiente). Para cadastrar o ThingsBoard nos dois serviços durante o seed, configure também o [gateway automático](docs/demo-make.md#cadastrar-o-gateway-automaticamente-no-seed).
+3. `make build-with-deps`
+4. `make up`
+5. `make healthcheck`
+6. `make seed-house`
+7. [Crie o administrador do simulador e valide os logins](docs/demo-make.md#login-e-criação-do-administrador-do-simulador).
 
 Se algum contexto de build estiver faltando (`iot_simulator` ou `middts-client`), o `make` vai avisar com instruções de correção.
 

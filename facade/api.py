@@ -111,7 +111,7 @@ def call_device_rpc(request, device_id: int, payload: DeviceRPCView):
     auth_response, status_code = get_gateway_auth_headers(request, gateway.id)
     if status_code != 200:
         return api.create_response(request, auth_response, status=status_code)
-    url = f"{gateway.url}/api/plugins/rpc/oneway/{device.identifier}"
+    url = f"{gateway.url.rstrip('/')}/api/plugins/rpc/oneway/{device.identifier}"
     headers = auth_response["headers"]
     # Gerar request_id único
     request_id = str(uuid.uuid4())
@@ -159,7 +159,7 @@ def discover_devices(request, gateway_id: int, params: DeviceDiscoveryParams = Q
         gateway_qs = gateway_qs.none()
     gateway = get_object_or_404(gateway_qs, id=gateway_id)
     headers = auth_response["headers"]
-    url = f"{gateway.url}/api/tenant/devices"
+    url = f"{gateway.url.rstrip('/')}/api/tenant/devices"
     # Helper functions (defined here so they are available for both created and updated devices)
     def try_sync_telemetry_keys_to_properties(dev_obj):
         try:
@@ -364,6 +364,17 @@ def discover_devices(request, gateway_id: int, params: DeviceDiscoveryParams = Q
         if not body:
             body = response.reason or "Gateway error"
         payload = {"detail": body}
+    if response.status_code == 401 and gateway.auth_method == GatewayIOT.AUTH_METHOD_API_KEY:
+        # ThingsBoard may say "Invalid username or password" even for ApiKey requests.
+        # Keep the upstream fields and identify the authentication actually used.
+        if not isinstance(payload, dict):
+            payload = {"upstream_response": payload}
+        payload["gateway_auth_method"] = "api_key"
+        payload["detail"] = (
+            "ThingsBoard rejected the API Key during device discovery. "
+            "No username/password login was attempted by discovery. "
+            "Check that the key is active, belongs to this instance and is a user API Key."
+        )
     return api.create_response(request, payload, status=response.status_code)
 
 @router.get(

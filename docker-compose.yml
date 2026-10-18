@@ -103,6 +103,9 @@ services:
       influxdb:
         condition: service_healthy
     environment:
+      DJANGO_SUPERUSER_USERNAME: ${DJANGO_SUPERUSER_USERNAME:-middts}
+      DJANGO_SUPERUSER_PASSWORD: ${DJANGO_SUPERUSER_PASSWORD:-middts123}
+      DJANGO_SUPERUSER_EMAIL: ${DJANGO_SUPERUSER_EMAIL:-middts@example.com}
       DJANGO_SETTINGS_MODULE: middleware_dt.settings_base
       HOST_IP: ${HOST_IP:-10.22.1.247}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,*}
@@ -120,8 +123,8 @@ services:
       REDIS_PORT: 6379
       NEO4J_URL: "bolt://neo4j:7687"
       NEO4J_BOLT_URL: "bolt://neo4j:7687"
-      NEO4J_USER: "neo4j"
-      NEO4J_PASSWORD: "middts123"
+      NEO4J_USER: ${NEO4J_USER:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-middts123}
       USE_NEO4J: "True"
       INFLUXDB_HOST: influxdb
       INFLUXDB_PORT: 8086
@@ -198,6 +201,12 @@ services:
       INFLUXDB_BUCKET: ${SIMULATOR_INFLUXDB_BUCKET:-iot_data}
       INFLUXDB_ORGANIZATION: ${INFLUXDB_ORGANIZATION:-middts}
       INFLUXDB_TOKEN: ${INFLUXDB_TOKEN:-admin_token_middts}
+      # Shared gateway bootstrap (creates missing entries only), applied by make seed-house / make seed-gateway.
+      SEED_THINGSBOARD_GATEWAY: ${SEED_THINGSBOARD_GATEWAY:-0}
+      THINGSBOARD_GATEWAY_NAME: ${THINGSBOARD_GATEWAY_NAME:-ThingsBoard Demo}
+      THINGSBOARD_GATEWAY_URL: ${THINGSBOARD_GATEWAY_URL:-}
+      THINGSBOARD_AUTH_METHOD: ${THINGSBOARD_AUTH_METHOD:-api_key}
+      THINGSBOARD_API_KEY: ${THINGSBOARD_API_KEY:-}
       SIMULATOR_NUMBER: ${SIMULATOR_NUMBER:-1}
       RANDOMIZE: ${RANDOMIZE:-1}
       USE_MEMORY_STATE: ${USE_MEMORY_STATE:-1}

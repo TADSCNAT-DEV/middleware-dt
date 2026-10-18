@@ -15,7 +15,7 @@ Behavior:
 This is intentionally conservative: it will not overwrite existing instances but
 will create missing ones and link properties where exact matches are found.
 """
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from facade.models import Device, Property
 from orchestrator.models import SystemContext, DTDLModel, DigitalTwinInstance, ModelElement, DigitalTwinInstanceProperty, DigitalTwinInstanceRelationship, ModelRelationship
@@ -24,6 +24,21 @@ from orchestrator.helpers import compute_similarity
 import re
 import os
 from django.conf import settings
+from neomodel import db
+
+
+def verify_neo4j_connection(dry_run):
+    """Fail before relational writes when graph authentication is unavailable."""
+    if dry_run or not getattr(settings, 'USE_NEO4J', False):
+        return
+    try:
+        db.cypher_query('RETURN 1')
+    except Exception:
+        raise CommandError(
+            'Nao foi possivel conectar ao Neo4j antes de gerar os DTs. '
+            'Confira NEO4J_USER, NEO4J_PASSWORD e NEO4J_AUTH; '
+            'nenhuma instancia foi criada por esta execucao.'
+        ) from None
 
 
 def build_model_graph(system: SystemContext | None):
@@ -321,7 +336,9 @@ class Command(BaseCommand):
         parser.add_argument('--system-id', type=int, help='SystemContext id to limit models')
         parser.add_argument('--dry-run', action='store_true', help='Do not persist changes')
 
+    @transaction.atomic
     def handle(self, *args, **options):
+        verify_neo4j_connection(options.get('dry_run', False))
         system = None
         if options.get('system_id'):
             system = SystemContext.objects.filter(pk=options['system_id']).first()
